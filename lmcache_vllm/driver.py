@@ -147,7 +147,7 @@ class LMCVLLMDriver:
                                Can be an empty list if nothing is injected
         """
         loaded_kv_indices = []
-        loaded_kv = [None, None]
+        loaded_kv = None
         tokens_new = []
         seq_ids = seq_group_metadata.seq_data.keys()
         seq_id = list(seq_ids)[0]
