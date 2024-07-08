@@ -106,7 +106,7 @@ class LMCVLLMDriver:
             loaded_block_nums: the block idx of the blocks that are being injected.
                                Can be an empty list if nothing is injected
         """
-        loaded_kv, loaded_kv_indices, tokens_new = self.cache_engine.retrive(torch.tensor(token_ids), self.device)
+        loaded_kv, loaded_kv_indices, tokens_new, prefix_only = self.cache_engine.retrive(torch.tensor(token_ids), self.device)
         #if loaded_kv_len > self.block_size: # skip if less than a single block
             #if inject:
             #    loaded_block_nums = self._inject_kv_cache(kv_caches, loaded_kv, loaded_kv_len, block_table)
@@ -115,7 +115,7 @@ class LMCVLLMDriver:
             #    return [], loaded_kv
         #else:
             #return [], []
-        return loaded_kv, loaded_kv_indices, tokens_new
+        return loaded_kv, loaded_kv_indices, tokens_new, prefix_only
 
     def collect_kv_and_store(
         self,
@@ -126,8 +126,9 @@ class LMCVLLMDriver:
     
     def dump(
         self,
+        path
     ):
-        self.cache_engine.dump()
+        self.cache_engine.dump(path)
     
     def retrive(
             self,
@@ -147,6 +148,7 @@ class LMCVLLMDriver:
                                Can be an empty list if nothing is injected
         """
         loaded_kv_indices = []
+        prefix_only = False
         loaded_kv = None
         tokens_new = []
         seq_ids = seq_group_metadata.seq_data.keys()
@@ -154,8 +156,8 @@ class LMCVLLMDriver:
         seq_data = seq_group_metadata.seq_data[seq_id]
         if self.cache_engine is not None and seq_group_metadata.block_tables is not None:
             block_table = seq_group_metadata.block_tables[seq_id]
-            loaded_kv, loaded_kv_indices, tokens_new = self.retrive_and_inject(kv_caches, seq_data.get_token_ids(), block_table)
-        return  loaded_kv, loaded_kv_indices, tokens_new
+            loaded_kv, loaded_kv_indices, tokens_new, prefix_only = self.retrive_and_inject(kv_caches, seq_data.get_token_ids(), block_table)
+        return  loaded_kv, loaded_kv_indices, tokens_new, prefix_only
 
     def collect_kv(
             self,
