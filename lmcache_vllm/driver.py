@@ -46,6 +46,8 @@ class LMCVLLMDriver:
         """
         self.block_size = block_size
 
+    # TODO(Jiayi): needs to be modified
+    # This is OPTIONAL as injecting KV cache is not needed for now
     def _inject_kv_cache(
             self,
             kv_caches: List[torch.Tensor],
@@ -92,6 +94,7 @@ class LMCVLLMDriver:
             kv_caches: List[torch.Tensor],
             token_ids: List[int],
             block_table: List[int],
+            inject: bool = False,
     ) -> List[int]:
         """
         For cache engine: inject the loaded cache into the kv_caches buffer
@@ -103,22 +106,68 @@ class LMCVLLMDriver:
             loaded_block_nums: the block idx of the blocks that are being injected.
                                Can be an empty list if nothing is injected
         """
-        loaded_kv, loaded_kv_len = self.cache_engine.retrive(torch.tensor(token_ids), self.device)
-        if loaded_kv_len > self.block_size: # skip if less than a single block
-            loaded_block_nums = self._inject_kv_cache(kv_caches, loaded_kv, loaded_kv_len, block_table)
-            return loaded_block_nums
-        else:
-            return []
+        loaded_kv, loaded_kv_indices, tokens_new, prefix_only = self.cache_engine.retrive(torch.tensor(token_ids), self.device)
+        #if loaded_kv_len > self.block_size: # skip if less than a single block
+            #if inject:
+            #    loaded_block_nums = self._inject_kv_cache(kv_caches, loaded_kv, loaded_kv_len, block_table)
+            #    return loaded_block_nums, []
+            #else:
+            #    return [], loaded_kv
+        #else:
+            #return [], []
+        return loaded_kv, loaded_kv_indices, tokens_new, prefix_only
 
     def collect_kv_and_store(
+        self,
+        token_ids,
+        hack_kvs,
+    ):
+        self.cache_engine.store(token_ids, hack_kvs)
+    
+    def dump(
+        self,
+        path
+    ):
+        self.cache_engine.dump(path)
+    
+    def retrive(
+            self,
+            kv_caches: List[torch.Tensor],
+            seq_group_metadata: SequenceGroupMetadata,
+        ):
+        """
+        Given a sequence group, this function tries to retrive the KV cache from the cache engine
+        and injects it into vLLM's kv cache object
+
+        Inputs:
+            kv_caches: the vLLM's KV cache buffer
+            seq_group_metadata: the SequenceGroupMetadata object for the sequence group
+
+        Returns:
+            loaded_block_nums: the block idx of the blocks that are being injected.
+                               Can be an empty list if nothing is injected
+        """
+        loaded_kv_indices = []
+        prefix_only = False
+        loaded_kv = None
+        tokens_new = []
+        seq_ids = seq_group_metadata.seq_data.keys()
+        seq_id = list(seq_ids)[0]
+        seq_data = seq_group_metadata.seq_data[seq_id]
+        if self.cache_engine is not None and seq_group_metadata.block_tables is not None:
+            block_table = seq_group_metadata.block_tables[seq_id]
+            loaded_kv, loaded_kv_indices, tokens_new, prefix_only = self.retrive_and_inject(kv_caches, seq_data.get_token_ids(), block_table)
+        return  loaded_kv, loaded_kv_indices, tokens_new, prefix_only
+
+    def collect_kv(
             self,
             kv_caches: List[torch.Tensor],
             token_ids: torch.Tensor,
             attn_metadata: AttentionMetadata,
             idx: int
-        ) -> None:
+        ):
         """
-        For lmcache engine: put the paged KV cache together and store it into the cache engine
+        For lmcache engine: put the paged KV cache together
         Input:
             kv_caches: the vLLM's KV cache buffer
             tokens_ids: a 1D tensor of ints representing the token ids
@@ -147,31 +196,4 @@ class LMCVLLMDriver:
             k = k_cache.permute([0, 3, 1, 2, 4]).reshape(-1, num_kv_heads, head_size)[slot_mapping]
             rebuilt_kv_cache.append((k, v))
 
-        self.cache_engine.store(token_ids, rebuilt_kv_cache)
-
-    def retrive(
-            self,
-            kv_caches: List[torch.Tensor],
-            seq_group_metadata: SequenceGroupMetadata,
-        ) -> List[int]:
-        """
-        Given a sequence group, this function tries to retrive the KV cache from the cache engine
-        and injects it into vLLM's kv cache object
-
-        Inputs:
-            kv_caches: the vLLM's KV cache buffer
-            seq_group_metadata: the SequenceGroupMetadata object for the sequence group
-
-        Returns:
-            loaded_block_nums: the block idx of the blocks that are being injected.
-                               Can be an empty list if nothing is injected
-        """
-        loaded_block_nums = []
-        seq_ids = seq_group_metadata.seq_data.keys()
-        seq_id = list(seq_ids)[0]
-        seq_data = seq_group_metadata.seq_data[seq_id]
-        if self.cache_engine is not None and seq_group_metadata.block_tables is not None:
-            block_table = seq_group_metadata.block_tables[seq_id]
-            loaded_block_nums = self.retrive_and_inject(kv_caches, seq_data.get_token_ids(), block_table)
-        return loaded_block_nums
-
+        return rebuilt_kv_cache
